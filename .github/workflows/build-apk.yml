@@ -1,0 +1,155 @@
+
+name: Build Trading Journal APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Create Web App
+        run: |
+          mkdir -p www
+          cat > www/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <meta name="theme-color" content="#101827">
+            <title>Trading Journal</title>
+            <style>
+              body {
+                margin: 0;
+                padding: 24px;
+                background: #101827;
+                color: white;
+                font-family: Arial, sans-serif;
+              }
+              h1 { color: #39d98a; }
+              input, button {
+                box-sizing: border-box;
+                width: 100%;
+                padding: 13px;
+                margin: 8px 0;
+                border-radius: 8px;
+                border: 0;
+              }
+              button {
+                background: #39d98a;
+                font-weight: bold;
+              }
+              .card {
+                background: #1e293b;
+                padding: 16px;
+                border-radius: 12px;
+                margin-top: 18px;
+              }
+            </style>
+          </head>
+          <body>
+            <h1>Trading Journal</h1>
+            <p>Record and review your trades.</p>
+            <div class="card">
+              <h3>Add Trade</h3>
+              <input id="pair" placeholder="Pair (e.g. EURUSD)">
+              <input id="entry" type="number" step="any" placeholder="Entry Price">
+              <input id="exit" type="number" step="any" placeholder="Exit Price">
+              <input id="lot" type="number" step="any" placeholder="Lot Size">
+              <button onclick="saveTrade()">Save Trade</button>
+            </div>
+            <div class="card">
+              <h3>Trade History</h3>
+              <div id="history">No trades saved yet.</div>
+            </div>
+            <script>
+              function getTrades() {
+                try {
+                  return JSON.parse(
+                    localStorage.getItem('trades') || '[]'
+                  );
+                } catch {
+                  return [];
+                }
+              }
+              function render() {
+                const trades = getTrades();
+                document.getElementById('history').innerHTML =
+                  trades.length
+                    ? trades.map(t =>
+                      '<p><b>' + t.pair +
+                      '</b> | Entry: ' + t.entry +
+                      ' | Exit: ' + t.exit +
+                      ' | P/L: ' + t.pnl.toFixed(2) +
+                      '</p>'
+                    ).join('')
+                    : 'No trades saved yet.';
+              }
+              function saveTrade() {
+                const pair = document.getElementById('pair').value.trim();
+                const entry = Number(document.getElementById('entry').value);
+                const exit = Number(document.getElementById('exit').value);
+                const lot = Number(document.getElementById('lot').value);
+                if (!pair || !entry || !exit || !lot ||
+                    entry <= 0 || exit <= 0 || lot <= 0) {
+                  alert('Please enter valid trade details.');
+                  return;
+                }
+                const trades = getTrades();
+                trades.unshift({
+                  pair, entry, exit, lot,
+                  pnl: (exit - entry) * lot
+                });
+                localStorage.setItem('trades', JSON.stringify(trades));
+                render();
+              }
+              render();
+            </script>
+          </body>
+          </html>
+          EOF
+
+      - name: Initialize Capacitor
+        run: |
+          npm init -y
+          npm install @capacitor/core@^7 @capacitor/android@^7
+          npm install --save-dev @capacitor/cli@^7
+          npx cap init "Trading Journal" "com.trading.journal" --web-dir www
+          npx cap add android
+          npx cap sync android
+
+      - name: Build APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Trading-Journal-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
